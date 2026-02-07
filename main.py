@@ -40,6 +40,15 @@ def ms_to_ass_time(ms: int) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
 
 
+def ms_to_srt_time(ms: int) -> str:
+    if ms < 0:
+        ms = 0
+    total_seconds, millis = divmod(ms, 1000)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
 def normalize_text(text: str) -> str:
     text = text.replace("\r", "")
     text = TAG_RE.sub("", text)
@@ -161,6 +170,8 @@ def build_styles(
     main_size: int,
     secondary_size: int,
     secondary_color: str,
+    main_margin_v: int,
+    secondary_margin_v: int,
 ) -> Tuple[str, str]:
     # Colors in ASS are AABBGGRR (hex). Default to light gray if invalid.
     color = secondary_color.strip().upper()
@@ -168,11 +179,11 @@ def build_styles(
         color = "&H00A0A0A0"
     main_style = (
         f"Style: Main,Arial,{main_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
-        "0,0,0,0,100,100,0,0,1,2,1,2,30,30,40,1"
+        f"0,0,0,0,100,100,0,0,1,2,1,2,30,30,{main_margin_v},1"
     )
     secondary_style = (
         f"Style: Secondary,PingFang SC,{secondary_size},{color},&H00FFFFFF,&H00202020,&H40000000,"
-        "0,0,0,0,100,100,0,0,1,2.5,0.8,2,30,30,80,1"
+        f"0,0,0,0,100,100,0,0,1,2.5,0.8,2,30,30,{secondary_margin_v},1"
     )
     return main_style, secondary_style
 
@@ -220,6 +231,15 @@ def build_output_path(main_path: Path, main_suffix: str) -> Path:
     return main_path.with_name(f"{base}.EN_CN.ass")
 
 
+def build_output_path_srt(main_path: Path, main_suffix: str) -> Path:
+    stem = main_path.stem
+    if stem.endswith(main_suffix):
+        base = stem[: -len(main_suffix)]
+    else:
+        base = stem
+    return main_path.with_name(f"{base}.EN_CN.srt")
+
+
 def run(
     main_path: Optional[str],
     secondary_path: Optional[str],
@@ -230,6 +250,7 @@ def run(
     secondary_size: int,
     secondary_color: str,
     gap_size: int,
+    output_format: str,
 ) -> Path:
     cwd = Path.cwd()
     main_file, secondary_file = infer_paths(
@@ -240,23 +261,36 @@ def run(
     secondary_entries = parse_srt(secondary_file)
     pairs = find_secondary_for_main(main_entries, secondary_entries)
 
-    main_style, secondary_style = build_styles(
-        main_size=main_size,
-        secondary_size=secondary_size,
-        secondary_color=secondary_color,
-    )
+    if output_format == "srt":
+        out_text = build_srt(pairs)
+        out_path = (
+            Path(output_path)
+            if output_path
+            else build_output_path_srt(main_file, main_suffix)
+        )
+    else:
+        main_style, secondary_style = build_styles(
+            main_size=main_size,
+            secondary_size=secondary_size,
+            secondary_color=secondary_color,
+            main_margin_v=0,
+            secondary_margin_v=0,
+        )
+        out_text = build_ass(
+            pairs,
+            main_style,
+            secondary_style,
+            main_margin_v=0,
+            secondary_margin_v=0,
+            gap_size=gap_size,
+        )
+        out_path = (
+            Path(output_path)
+            if output_path
+            else build_output_path(main_file, main_suffix)
+        )
 
-    ass_text = build_ass(
-        pairs,
-        main_style,
-        secondary_style,
-        main_margin_v=80,
-        secondary_margin_v=40,
-        gap_size=gap_size,
-    )
-
-    out_path = Path(output_path) if output_path else build_output_path(main_file, main_suffix)
-    out_path.write_text(ass_text, encoding="utf-8")
+    out_path.write_text(out_text, encoding="utf-8")
     return out_path
 
 
@@ -288,7 +322,37 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=30,
         help="Gap size between main and secondary (font size units).",
     )
+    parser.add_argument(
+        "--format",
+        choices=["ass", "srt"],
+        default="srt",
+        help="Output format (ass or srt).",
+    )
     return parser
+
+
+def build_srt(
+    pairs: List[Tuple[SrtEntry, Optional[SrtEntry]]],
+) -> str:
+    lines: List[str] = []
+    idx = 1
+    for main, secondary in pairs:
+        if not main.text:
+            continue
+        start = ms_to_srt_time(main.start_ms)
+        end = ms_to_srt_time(main.end_ms)
+        main_text = main.text.replace("\\N", "\n")
+        if secondary and secondary.text:
+            secondary_text = secondary.text.replace("\\N", "\n")
+            text = f"{main_text}\n{secondary_text}"
+        else:
+            text = main_text
+        lines.append(str(idx))
+        lines.append(f"{start} --> {end}")
+        lines.append(text)
+        lines.append("")
+        idx += 1
+    return "\n".join(lines).strip() + "\n"
 
 
 def main() -> None:
@@ -304,6 +368,7 @@ def main() -> None:
         secondary_size=args.secondary_size,
         secondary_color=args.secondary_color,
         gap_size=args.gap_size,
+        output_format=args.format,
     )
     print(f"Wrote: {out_path}")
 
