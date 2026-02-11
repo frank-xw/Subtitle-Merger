@@ -38,6 +38,12 @@ python main.py --format ass
 python main.py -o merged.srt
 ```
 
+**Bulk process a directory or glob (multiple files):**
+```bash
+python main.py --bulk .
+python main.py --bulk "/path/to/*-EN.srt"
+```
+
 **Adjust font sizes (ASS only):**
 ```bash
 python main.py --format ass --main-size 60 --secondary-size 50
@@ -64,4 +70,5 @@ The script matches subtitles by timestamp (with 500ms tolerance), then generates
 - Input must be valid SRT format
 - HTML tags are automatically removed
 - Only handles two subtitle tracks at a time
+- Bulk mode processes each main file and auto-matches its secondary file by suffix
 - Font size and color options only apply to ASS format

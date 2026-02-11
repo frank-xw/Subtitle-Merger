@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -294,13 +295,73 @@ def run(
     return out_path
 
 
+def resolve_bulk_main_files(bulk: str, main_suffix: str) -> List[Path]:
+    bulk = bulk.strip()
+    if not bulk:
+        raise FileNotFoundError("Bulk path or pattern is empty.")
+    expanded = Path(bulk).expanduser()
+    if expanded.exists() and expanded.is_dir():
+        matches = list(expanded.glob(f"*{main_suffix}.srt"))
+    else:
+        matches = [Path(path) for path in glob.glob(bulk)]
+    filtered = [
+        path
+        for path in matches
+        if path.is_file() and path.name.endswith(f"{main_suffix}.srt")
+    ]
+    if not filtered:
+        raise FileNotFoundError(
+            f"No main subtitles found for bulk input: {bulk}"
+        )
+    return sorted(filtered)
+
+
+def run_bulk(
+    bulk: str,
+    output_path: Optional[str],
+    main_suffix: str,
+    secondary_suffix: str,
+    main_size: int,
+    secondary_size: int,
+    secondary_color: str,
+    gap_size: int,
+    output_format: str,
+) -> List[Path]:
+    if output_path:
+        raise ValueError("--output is not supported with --bulk.")
+    main_files = resolve_bulk_main_files(bulk, main_suffix)
+    outputs: List[Path] = []
+    for main_file in main_files:
+        out_path = run(
+            main_path=str(main_file),
+            secondary_path=None,
+            output_path=None,
+            main_suffix=main_suffix,
+            secondary_suffix=secondary_suffix,
+            main_size=main_size,
+            secondary_size=secondary_size,
+            secondary_color=secondary_color,
+            gap_size=gap_size,
+            output_format=output_format,
+        )
+        outputs.append(out_path)
+    return outputs
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Merge two SRT subtitles into one ASS file with distinct styles.",
+        description="Merge two SRT subtitles into one ASS or SRT file with distinct styles.",
     )
     parser.add_argument("main", nargs="?", help="Main SRT file (default: *-EN.srt)")
     parser.add_argument(
         "secondary", nargs="?", help="Secondary SRT file (default: *-CN.srt)"
+    )
+    parser.add_argument(
+        "--bulk",
+        help=(
+            "Process multiple main SRT files. Accepts a directory or glob pattern "
+            "(e.g. '/path/*.srt')."
+        ),
     )
     parser.add_argument("-o", "--output", help="Output ASS file path")
     parser.add_argument("--main-suffix", default="-EN", help="Main suffix in filename")
@@ -358,19 +419,34 @@ def build_srt(
 def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
-    out_path = run(
-        main_path=args.main,
-        secondary_path=args.secondary,
-        output_path=args.output,
-        main_suffix=args.main_suffix,
-        secondary_suffix=args.secondary_suffix,
-        main_size=args.main_size,
-        secondary_size=args.secondary_size,
-        secondary_color=args.secondary_color,
-        gap_size=args.gap_size,
-        output_format=args.format,
-    )
-    print(f"Wrote: {out_path}")
+    if args.bulk:
+        out_paths = run_bulk(
+            bulk=args.bulk,
+            output_path=args.output,
+            main_suffix=args.main_suffix,
+            secondary_suffix=args.secondary_suffix,
+            main_size=args.main_size,
+            secondary_size=args.secondary_size,
+            secondary_color=args.secondary_color,
+            gap_size=args.gap_size,
+            output_format=args.format,
+        )
+        for out_path in out_paths:
+            print(f"Wrote: {out_path}")
+    else:
+        out_path = run(
+            main_path=args.main,
+            secondary_path=args.secondary,
+            output_path=args.output,
+            main_suffix=args.main_suffix,
+            secondary_suffix=args.secondary_suffix,
+            main_size=args.main_size,
+            secondary_size=args.secondary_size,
+            secondary_color=args.secondary_color,
+            gap_size=args.gap_size,
+            output_format=args.format,
+        )
+        print(f"Wrote: {out_path}")
 
 
 if __name__ == "__main__":
